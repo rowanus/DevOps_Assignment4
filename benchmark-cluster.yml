@@ -1,0 +1,48 @@
+---
+- hosts: localhost
+  gather_facts: yes
+  become: yes
+  tasks:
+    - name: update Debian
+      ansible.builtin.apt:
+        update_cache: yes
+      when: ansible_os_family == 'Debian'
+
+    - name: update RedHat
+      ansible.builtin.yum:
+        update_cache: yes
+      when: ansible_os_family == 'RedHat'
+
+    - ansible.builtin.package:
+        name:
+          - wrk
+        state: present
+
+- hosts: master
+  vars:
+    replicas: [1, 2, 4, 8]
+  tasks:
+    - name: remove whoami service
+      command: "docker service rm whoami-{{ item }}"
+      become: yes
+      ignore_errors: True
+      loop: "{{ replicas }}"
+
+    - name: create whoami service
+      command: "docker service create --name whoami-{{ item }} --publish published=808{{ item }},target=80 --replicas {{ item }} containous/whoami"
+      become: yes
+      loop: "{{ replicas }}"
+
+- hosts: localhost
+  gather_facts: yes
+  vars:
+    num_instances: [1, 2, 4, 8]
+  tasks:
+    - name: wrk
+      command: "wrk -t4 -c5 -d30s http://{{ hostvars | first }}:808{{ item }}"
+      register: wrk_output
+      loop: "{{ num_instances }}"
+    - name: print the avg Rec/Sec for each instance group
+      ansible.builtin.debug:
+        msg: '{{ item.stdout_lines | select("search", "Req/Sec") }}'
+      loop: "{{ wrk_output.results }}"
